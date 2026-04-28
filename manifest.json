@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "MangaDex Latest Enhancer",
+  "version": "0.1.0",
+  "description": "Adds tag and content-rating chips to chapter rows on /titles/latest.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://api.mangadex.org/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://mangadex.org/*"],
+      "js": ["src/content.js"],
+      "css": ["src/styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  }
+}
