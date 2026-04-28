@@ -85,19 +85,35 @@ async function setToken(token) {
 }
 
 async function fetchLibraryStatuses(token) {
-  const res = await fetch(`${API_BASE}/manga/status`, {
+  const url = `${API_BASE}/manga/status`;
+  console.info('[mdx-ext bg] fetching', url);
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (res.status === 401) {
+    console.warn('[mdx-ext bg] /manga/status returned 401 — token rejected');
     const err = new Error('unauthorized');
     err.status = 401;
     throw err;
   }
   if (!res.ok) {
+    console.warn('[mdx-ext bg] /manga/status returned', res.status);
     throw new Error(`MangaDex API ${res.status}`);
   }
   const json = await res.json();
-  return json.statuses || {};
+  const statuses = json.statuses || {};
+  const count = Object.keys(statuses).length;
+  console.info(
+    `[mdx-ext bg] /manga/status ok — ${count} statuses received`,
+    count > 0 ? Object.values(statuses).slice(0, 5) : '',
+  );
+  if (count === 0 && json && !json.statuses) {
+    console.warn(
+      '[mdx-ext bg] response had no "statuses" key; response keys:',
+      Object.keys(json),
+    );
+  }
+  return statuses;
 }
 
 async function getLibraryStatuses(senderTabId) {
@@ -157,6 +173,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'SET_TOKEN') {
     (async () => {
       await setToken(msg.token || null);
+      // Bust any stale empty cache so the next status lookup re-fetches with the new token.
+      await chrome.storage.session.remove(LIBRARY_CACHE_KEY);
+      console.info('[mdx-ext bg] auth token stored');
       sendResponse({ ok: true });
     })();
     return true;

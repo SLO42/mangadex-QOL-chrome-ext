@@ -312,6 +312,28 @@
   }
 
   function findJWT() {
+    // Fast path: oidc-client-ts user object stored under "oidc.user:<issuer>:<client>"
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('oidc.user:')) continue;
+        const value = localStorage.getItem(key);
+        if (!value) continue;
+        try {
+          const data = JSON.parse(value);
+          const token = data?.access_token || data?.id_token;
+          if (token && isJWTShape(token)) {
+            const payload = decodeJWTPayload(token);
+            const now = Math.floor(Date.now() / 1000);
+            if (!payload?.exp || payload.exp > now) {
+              return token;
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+
+    // Fallback: heuristic scan of all localStorage values for JWT-shaped strings
     const candidates = [];
     try {
       for (let i = 0; i < localStorage.length; i++) {
@@ -336,9 +358,8 @@
         const claimsStr = JSON.stringify(c.payload).toLowerCase();
         let score = 0;
         if (claimsStr.includes('mangadex')) score += 10;
-        if (c.payload.azp || c.payload.scope) score += 3;
-        if (c.payload.typ === 'Bearer') score += 2;
-        if (c.payload.token_type === 'access') score += 5;
+        if (c.payload.scope) score += 10; // strong access-token marker
+        if (c.payload.azp) score += 1;
         return { ...c, score };
       })
       .sort((a, b) => b.score - a.score);
@@ -356,9 +377,17 @@
       );
       return;
     }
+    const payload = decodeJWTPayload(token) || {};
+    console.info(
+      '[mdx-ext] auth token discovered',
+      `(iss=${payload.iss}, scope=${payload.scope || '<none>'}, exp=${
+        payload.exp ? new Date(payload.exp * 1000).toISOString() : '<none>'
+      })`,
+    );
     if (!isRuntimeAlive()) return;
     try {
       await chrome.runtime.sendMessage({ type: 'SET_TOKEN', token });
+      console.info('[mdx-ext] auth token registered with service worker');
     } catch (err) {
       const msg = err?.message || String(err);
       if (!msg.includes('Extension context invalidated')) {
@@ -383,6 +412,5 @@
     statusQueue.clear();
   });
 
-  syncToken();
-  scopeDetector.check();
+  syncToken().finally(() => scopeDetector.check());
 })();
