@@ -232,13 +232,28 @@
     },
   };
 
+  const ROW_CONTAINER_SELECTORS = [
+    '.chapter-feed__container', // /titles/latest, home feed
+    '.manga-card', // /titles/recent (best-guess; will fall back to anchor if absent)
+    '.manga-list-item',
+  ];
+
+  function findRowContainer(anchor) {
+    for (const sel of ROW_CONTAINER_SELECTORS) {
+      const el = anchor.closest(sel);
+      if (el) return el;
+    }
+    return null;
+  }
+
   const stripeRenderer = {
     apply(anchor, status) {
       if (anchor.dataset.mdxExtStripe === 'rendered') return;
       anchor.dataset.mdxExtStripe = 'rendered';
       if (!status) return;
       const safe = String(status).replace(/[^a-z_]/gi, '');
-      anchor.classList.add('mdx-ext-status', `mdx-ext-status--${safe}`);
+      const target = findRowContainer(anchor) || anchor;
+      target.classList.add('mdx-ext-status', `mdx-ext-status--${safe}`);
     },
   };
 
