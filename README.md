@@ -60,8 +60,24 @@ src/
 ├── content.js           # DOM observation, JWT discovery, pill + stripe renderers
 ├── background.js        # API fetch (manga attrs + library status), caches
 └── styles.css           # pill styling + stripe color rules
+icons/
+├── icon.svg             # source SVG (single source of truth)
+├── generate.html        # opens in a browser; generates icon{16,32,48,128}.png
+└── icon{16,32,48,128}.png  # generated; not committed unless publishing
 docs/superpowers/specs/  # design docs for v0.1, v0.2, v0.3
 ```
+
+### Icons
+
+The toolbar icons referenced in `manifest.json` are not committed to the
+repo. For unpacked development installs, Chrome falls back to its default
+puzzle-piece icon and prints a non-fatal "could not load icon" warning.
+
+To generate the PNGs (e.g., before publishing to the Chrome Web Store):
+
+1. Open `icons/generate.html` directly in any browser.
+2. Click **Generate & download all four**.
+3. Save the four downloaded `iconN.png` files into the `icons/` folder.
 
 ## Reloading after changes
 
@@ -96,3 +112,39 @@ extension's card → reload any open MangaDex tab.
 | Completed | indigo (`#6366f1`) |
 | On Hold | slate (`#64748b`) |
 | Dropped | red (`#ef4444`) |
+
+## Publishing to the Chrome Web Store
+
+If you decide to publish later, here's everything you'll need beyond what
+the manifest already provides.
+
+### Permissions justification (Web Store form)
+
+| Permission | Justification |
+|---|---|
+| `storage` | Caches manga attributes (`chrome.storage.local`, 7-day TTL) and the user's reading-status map plus auth token (`chrome.storage.session`, cleared on browser close). |
+| `host_permissions: api.mangadex.org` | The extension calls MangaDex's public API to retrieve manga metadata and the user's reading statuses. |
+
+### Privacy note
+
+- No analytics, no telemetry, no third-party servers. The only network
+  endpoint contacted is `https://api.mangadex.org`.
+- The user's auth token is read from same-origin localStorage on
+  `mangadex.org` (the page where they are already authenticated), held
+  only in `chrome.storage.session` (auto-cleared on browser close), and
+  never written to disk via `chrome.storage.local` or transmitted
+  anywhere except as a `Bearer` header back to `api.mangadex.org`.
+- Library data (which manga have which reading status) is held only in
+  `chrome.storage.session` for 5 minutes per fetch.
+
+### Listing assets to prepare
+
+- 1 small promotional tile: 440×280 PNG (Web Store requires it)
+- At least 1 screenshot: 1280×800 or 640×400 PNG of the extension in use
+- Short description (≤132 chars): the `description` field of `manifest.json`
+- Detailed description: this README's intro section is fine
+
+### Store category
+
+Suggested: **Productivity** (or **Accessibility** since the stripes are
+a visual scanning aid).

@@ -1,10 +1,26 @@
 {
   "manifest_version": 3,
-  "name": "MangaDex Latest Enhancer",
-  "version": "0.1.0",
-  "description": "Adds tag and content-rating chips to chapter rows on /titles/latest.",
+  "name": "MangaDex QOL",
+  "short_name": "MangaDex QOL",
+  "version": "0.3.0",
+  "description": "Quality-of-life enhancements for MangaDex listings: tag/content-rating chips and colored library-status stripes.",
+  "homepage_url": "https://github.com/SLO42/mangadex-QOL-chrome-ext",
+  "author": "SLO42",
   "permissions": ["storage"],
   "host_permissions": ["https://api.mangadex.org/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "MangaDex QOL",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["https://mangadex.org/*"],
