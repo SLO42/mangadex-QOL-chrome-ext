@@ -1,7 +1,9 @@
 (() => {
   'use strict';
 
-  const SCOPE_PATTERN = /^\/titles\/latest(\/|\?|$)/;
+  const SCOPE_PATTERN =
+    /^\/(titles\/(latest|recent)\/?|search\/?|list\/[^/?]+\/?)?(\?.*)?$/;
+  const EXCLUDE_PATTERN = /^\/titles\/follows\/feed/;
   const TITLE_HREF_PATTERN = /^\/title\/([0-9a-f-]{36})/i;
   const DEBOUNCE_MS = 100;
   const MAX_TAGS = 4;
@@ -12,17 +14,23 @@
     pornographic: 'mature',
   };
 
+  const inScope = () => {
+    const path = location.pathname;
+    if (EXCLUDE_PATTERN.test(path)) return false;
+    return SCOPE_PATTERN.test(path);
+  };
+
   const scopeDetector = (() => {
     let active = false;
     const enter = [];
     const leave = [];
 
     const check = () => {
-      const inScope = SCOPE_PATTERN.test(location.pathname);
-      if (inScope && !active) {
+      const now = inScope();
+      if (now && !active) {
         active = true;
         enter.forEach((fn) => fn());
-      } else if (!inScope && active) {
+      } else if (!now && active) {
         active = false;
         leave.forEach((fn) => fn());
       }
@@ -98,7 +106,7 @@
     return true;
   };
 
-  const lookupQueue = (() => {
+  function makeQueue(messageType, responseKey) {
     const pending = new Map();
     let timer = null;
 
@@ -122,10 +130,7 @@
 
       let response;
       try {
-        response = await chrome.runtime.sendMessage({
-          type: 'LOOKUP_MANGA',
-          ids,
-        });
+        response = await chrome.runtime.sendMessage({ type: messageType, ids });
       } catch (err) {
         const msg = err?.message || String(err);
         if (msg.includes('Extension context invalidated')) {
@@ -133,29 +138,24 @@
           resolveAllNull(ids);
           return;
         }
-        console.warn('[mdx-ext] sendMessage failed', err);
+        console.warn(`[mdx-ext] ${messageType} failed`, err);
         response = null;
       }
 
-      const data = response?.data || {};
+      const data = response?.[responseKey] || {};
       for (const id of ids) {
         const cbs = pending.get(id);
         pending.delete(id);
-        cbs?.forEach((cb) => cb(data[id] || null));
+        cbs?.forEach((cb) => cb(data[id] ?? null));
       }
     };
 
-    const schedule = () => {
-      if (timer) return;
-      timer = setTimeout(flush, DEBOUNCE_MS);
-    };
-
     return {
-      lookup: (mangaId) =>
+      lookup: (id) =>
         new Promise((resolve) => {
-          if (!pending.has(mangaId)) pending.set(mangaId, []);
-          pending.get(mangaId).push(resolve);
-          schedule();
+          if (!pending.has(id)) pending.set(id, []);
+          pending.get(id).push(resolve);
+          if (!timer) timer = setTimeout(flush, DEBOUNCE_MS);
         }),
       clear: () => {
         if (timer) {
@@ -165,7 +165,10 @@
         pending.clear();
       },
     };
-  })();
+  }
+
+  const lookupQueue = makeQueue('LOOKUP_MANGA', 'data');
+  const statusQueue = makeQueue('GET_STATUSES', 'statuses');
 
   const CHIP_BASE =
     'mdx-ext-pill inline-flex items-center gap-1 rounded uppercase' +
@@ -187,8 +190,8 @@
 
   const pillRenderer = {
     render(anchor, data) {
-      if (!data || anchor.dataset.mdxExt === 'rendered') return;
-      anchor.dataset.mdxExt = 'rendered';
+      if (!data || anchor.dataset.mdxExtPills === 'rendered') return;
+      anchor.dataset.mdxExtPills = 'rendered';
 
       const container = document.createElement('span');
       container.className = 'mdx-ext-pills flex flex-wrap gap-1 self-start';
@@ -229,6 +232,16 @@
     },
   };
 
+  const stripeRenderer = {
+    apply(anchor, status) {
+      if (anchor.dataset.mdxExtStripe === 'rendered') return;
+      anchor.dataset.mdxExtStripe = 'rendered';
+      if (!status) return;
+      const safe = String(status).replace(/[^a-z_]/gi, '');
+      anchor.classList.add('mdx-ext-status', `mdx-ext-status--${safe}`);
+    },
+  };
+
   function findTitleElement(anchor) {
     const all = anchor.querySelectorAll('*');
     for (const el of all) {
@@ -241,17 +254,135 @@
     return null;
   }
 
-  const handleAnchor = async ({ anchor, mangaId }) => {
-    const data = await lookupQueue.lookup(mangaId);
-    if (!anchor.isConnected) return;
-    pillRenderer.render(anchor, data);
+  const handleAnchor = ({ anchor, mangaId }) => {
+    lookupQueue.lookup(mangaId).then((data) => {
+      if (!anchor.isConnected) return;
+      pillRenderer.render(anchor, data);
+    });
+    statusQueue.lookup(mangaId).then((status) => {
+      if (!anchor.isConnected) return;
+      stripeRenderer.apply(anchor, status);
+    });
   };
+
+  // ───── Auth (JWT discovery from localStorage) ─────────────────────
+
+  function isJWTShape(s) {
+    return (
+      typeof s === 'string' &&
+      /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(s)
+    );
+  }
+
+  function decodeJWTPayload(jwt) {
+    try {
+      const parts = jwt.split('.');
+      if (parts.length !== 3) return null;
+      let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      return JSON.parse(atob(b64));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function extractJWTs(value) {
+    const found = [];
+    const visit = (v) => {
+      if (typeof v === 'string') {
+        const matches = v.match(
+          /[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g,
+        );
+        if (matches) {
+          for (const m of matches) if (isJWTShape(m)) found.push(m);
+        }
+        if (v.startsWith('{') || v.startsWith('[')) {
+          try {
+            visit(JSON.parse(v));
+          } catch (e) {}
+        }
+      } else if (Array.isArray(v)) {
+        v.forEach(visit);
+      } else if (v && typeof v === 'object') {
+        Object.values(v).forEach(visit);
+      }
+    };
+    visit(value);
+    return found;
+  }
+
+  function findJWT() {
+    const candidates = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        const value = localStorage.getItem(key);
+        if (!value) continue;
+        for (const jwt of extractJWTs(value)) {
+          candidates.push(jwt);
+        }
+      }
+    } catch (e) {
+      return null;
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const scored = candidates
+      .map((jwt) => ({ jwt, payload: decodeJWTPayload(jwt) }))
+      .filter((c) => c.payload)
+      .filter((c) => !c.payload.exp || c.payload.exp > now)
+      .map((c) => {
+        const claimsStr = JSON.stringify(c.payload).toLowerCase();
+        let score = 0;
+        if (claimsStr.includes('mangadex')) score += 10;
+        if (c.payload.azp || c.payload.scope) score += 3;
+        if (c.payload.typ === 'Bearer') score += 2;
+        if (c.payload.token_type === 'access') score += 5;
+        return { ...c, score };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    if (scored.length === 0) return null;
+    if (scored[0].score < 10) return null;
+    return scored[0].jwt;
+  }
+
+  async function syncToken() {
+    const token = findJWT();
+    if (!token) {
+      console.info(
+        '[mdx-ext] not logged in to MangaDex (no JWT found); library stripes disabled',
+      );
+      return;
+    }
+    if (!isRuntimeAlive()) return;
+    try {
+      await chrome.runtime.sendMessage({ type: 'SET_TOKEN', token });
+    } catch (err) {
+      const msg = err?.message || String(err);
+      if (!msg.includes('Extension context invalidated')) {
+        console.warn('[mdx-ext] SET_TOKEN failed', err);
+      }
+    }
+  }
+
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg?.type === 'REQUEST_TOKEN_REFRESH') {
+      syncToken();
+    }
+    return false;
+  });
+
+  // ───── Wire up ────────────────────────────────────────────────────
 
   scopeDetector.onEnter(() => rowScanner.start(handleAnchor));
   scopeDetector.onLeave(() => {
     rowScanner.stop();
     lookupQueue.clear();
+    statusQueue.clear();
   });
 
+  syncToken();
   scopeDetector.check();
 })();

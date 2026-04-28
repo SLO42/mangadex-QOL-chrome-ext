@@ -16,3 +16,28 @@
 
 :where(.mdx-ext-tag-group--format)    { background-color: #7c3aed; color: #fff; }
 :where(.mdx-ext-tag-group--content)   { background-color: #c62828; color: #fff; }
+
+/* ───── Library status stripes ───── */
+
+.mdx-ext-status {
+  position: relative;
+}
+
+.mdx-ext-status::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.mdx-ext-status--reading::before      { background-color: #16a34a; }
+.mdx-ext-status--re_reading::before   { background-color: #06b6d4; }
+.mdx-ext-status--plan_to_read::before { background-color: #f59e0b; }
+.mdx-ext-status--completed::before    { background-color: #6366f1; }
+.mdx-ext-status--on_hold::before      { background-color: #64748b; }
+.mdx-ext-status--dropped::before      { background-color: #ef4444; }
